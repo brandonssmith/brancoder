@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                             QComboBox, QProgressBar, QListWidget, QStyle,
                             QMessageBox, QSlider, QTextEdit, QSizePolicy, QLineEdit, QSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QSize, QObject
-from PyQt6.QtGui import QPalette, QColor, QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QUrl, QSize, QObject, QRect, QPoint, QTimer
+from PyQt6.QtGui import QPalette, QColor, QIcon, QPainter, QPen, QBrush
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 import ffmpeg
@@ -211,6 +211,162 @@ class DryRunWorker(QObject):
         except Exception as e:
             self.finished.emit(False, 0, str(e))
 
+class TimelineWidget(QWidget):
+    positionChanged = pyqtSignal(int)
+    inPointChanged = pyqtSignal(int)
+    outPointChanged = pyqtSignal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumHeight(60)
+        self.setMouseTracking(True)
+        
+        self.duration = 0
+        self.position = 0
+        self.in_point = 0
+        self.out_point = 0
+        
+        self.dragging = None  # None, 'position', 'in', or 'out'
+        self.drag_start_pos = None
+        self.drag_start_value = None
+        
+        # Colors
+        self.timeline_color = QColor(0, 0, 0)  # Black for main position marker
+        self.in_point_color = QColor(42, 130, 218)  # Blue
+        self.out_point_color = QColor(255, 68, 68)  # Red
+        self.selection_color = QColor(42, 130, 218, 50)  # Semi-transparent blue
+        
+        # Marker sizes
+        self.marker_width = 12
+        self.marker_height = 20
+        self.timeline_height = 8
+        
+        # Set fixed height
+        self.setFixedHeight(60)
+
+    def setDuration(self, duration):
+        self.duration = duration
+        self.out_point = duration
+        self.update()
+
+    def setPosition(self, position):
+        self.position = position
+        self.update()
+
+    def setInPoint(self, in_point):
+        self.in_point = in_point
+        self.update()
+
+    def setOutPoint(self, out_point):
+        self.out_point = out_point
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw timeline background
+        timeline_rect = QRect(0, (self.height() - self.timeline_height) // 2,
+                            self.width(), self.timeline_height)
+        painter.fillRect(timeline_rect, QColor(42, 42, 42))
+        
+        # Draw selection range
+        if self.duration > 0:
+            in_x = int(self.in_point * self.width() / self.duration)
+            out_x = int(self.out_point * self.width() / self.duration)
+            selection_rect = QRect(in_x, 0, out_x - in_x, self.height())
+            painter.fillRect(selection_rect, self.selection_color)
+        
+        # Draw in/out markers
+        if self.duration > 0:
+            # In point marker
+            in_x = int(self.in_point * self.width() / self.duration)
+            in_rect = QRect(in_x - self.marker_width // 2,
+                          (self.height() - self.marker_height) // 2,
+                          self.marker_width, self.marker_height)
+            painter.fillRect(in_rect, self.in_point_color)
+            
+            # Out point marker
+            out_x = int(self.out_point * self.width() / self.duration)
+            out_rect = QRect(out_x - self.marker_width // 2,
+                           (self.height() - self.marker_height) // 2,
+                           self.marker_width, self.marker_height)
+            painter.fillRect(out_rect, self.out_point_color)
+        
+        # Draw position marker last so it's on top
+        if self.duration > 0:
+            pos_x = int(self.position * self.width() / self.duration)
+            pos_rect = QRect(pos_x - self.marker_width // 2,
+                           (self.height() - self.marker_height) // 2,
+                           self.marker_width, self.marker_height)
+            painter.fillRect(pos_rect, self.timeline_color)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            pos = event.position().x()
+            if self.duration > 0:
+                # Check which marker is being clicked
+                in_x = int(self.in_point * self.width() / self.duration)
+                out_x = int(self.out_point * self.width() / self.duration)
+                pos_x = int(self.position * self.width() / self.duration)
+                
+                # Define click areas for each marker
+                in_rect = QRect(in_x - self.marker_width, 0, self.marker_width * 2, self.height())
+                out_rect = QRect(out_x - self.marker_width, 0, self.marker_width * 2, self.height())
+                pos_rect = QRect(pos_x - self.marker_width, 0, self.marker_width * 2, self.height())
+                
+                # Convert position coordinates to integers
+                click_x = int(pos)
+                click_y = int(event.position().y())
+                
+                if in_rect.contains(click_x, click_y):
+                    self.dragging = 'in'
+                elif out_rect.contains(click_x, click_y):
+                    self.dragging = 'out'
+                elif pos_rect.contains(click_x, click_y):
+                    self.dragging = 'position'
+                else:
+                    # Click on timeline - set position
+                    new_pos = int(pos * self.duration / self.width())
+                    new_pos = max(self.in_point, min(self.out_point, new_pos))
+                    self.position = new_pos
+                    self.positionChanged.emit(self.position)
+                    self.update()
+                
+                self.drag_start_pos = pos
+                if self.dragging == 'in':
+                    self.drag_start_value = self.in_point
+                elif self.dragging == 'out':
+                    self.drag_start_value = self.out_point
+                elif self.dragging == 'position':
+                    self.drag_start_value = self.position
+
+    def mouseMoveEvent(self, event):
+        if self.dragging and self.duration > 0:
+            pos = event.position().x()
+            delta = pos - self.drag_start_pos
+            new_value = int(self.drag_start_value + (delta * self.duration / self.width()))
+            
+            if self.dragging == 'in':
+                new_value = max(0, min(self.out_point, new_value))
+                self.in_point = new_value
+                self.inPointChanged.emit(new_value)
+            elif self.dragging == 'out':
+                new_value = max(self.in_point, min(self.duration, new_value))
+                self.out_point = new_value
+                self.outPointChanged.emit(new_value)
+            elif self.dragging == 'position':
+                new_value = max(self.in_point, min(self.out_point, new_value))
+                self.position = new_value
+                self.positionChanged.emit(new_value)
+            
+            self.update()
+
+    def mouseReleaseEvent(self, event):
+        self.dragging = None
+        self.drag_start_pos = None
+        self.drag_start_value = None
+
 class VideoConverter(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -218,6 +374,10 @@ class VideoConverter(QMainWindow):
         self.setMinimumSize(1200, 800)
         self.current_video_path = None
         self.output_directory = None
+        self.video_fps = 30  # Default fps, will be updated when video is loaded
+        
+        # Enable keyboard tracking
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         
         # Check FFmpeg installation
         ffmpeg_installed, ffmpeg_version = check_ffmpeg()
@@ -283,6 +443,14 @@ class VideoConverter(QMainWindow):
             streams = probe['streams']
             v_stream = next((s for s in streams if s['codec_type'] == 'video'), None)
             a_stream = next((s for s in streams if s['codec_type'] == 'audio'), None)
+            
+            # Get video FPS
+            if v_stream and 'r_frame_rate' in v_stream:
+                num, den = map(int, v_stream['r_frame_rate'].split('/'))
+                self.video_fps = num / den if den != 0 else 30
+            else:
+                self.video_fps = 30  # Default if not found
+            
             info = f"File: {os.path.basename(self.current_video_path)}\n"
             info += f"Duration: {float(fmt['duration']):.2f} sec\n"
             if v_stream:
@@ -422,15 +590,33 @@ class VideoConverter(QMainWindow):
         
         self.video_widget = QVideoWidget()
         self.video_widget.setStyleSheet("background-color: #2a2a2a;")
-        self.video_widget.setMinimumHeight(400)  # Increased height
+        self.video_widget.setMinimumHeight(400)
         preview_container_layout.addWidget(self.video_widget)
         
+        # Timeline controls moved directly under preview
+        timeline_container = QWidget()
+        timeline_layout = QVBoxLayout(timeline_container)
+        timeline_layout.setSpacing(2)
+        
+        # Replace sliders with custom timeline widget
+        self.timeline_widget = TimelineWidget()
+        self.timeline_widget.positionChanged.connect(self.set_position)
+        self.timeline_widget.inPointChanged.connect(self.update_in_point)
+        self.timeline_widget.outPointChanged.connect(self.update_out_point)
+        timeline_layout.addWidget(self.timeline_widget)
+        
+        # Time label
+        self.time_label = QLabel("00:00:00 / 00:00:00 [In: 00:00:00 Out: 00:00:00] (I/O: Set points, ←/→: Frame step, Space: Play/Pause)")
+        self.time_label.setStyleSheet("color: white;")
+        timeline_layout.addWidget(self.time_label)
+        
+        preview_container_layout.addWidget(timeline_container)
         middle_layout.addWidget(preview_container)
 
         # Playback controls
         controls_widget = QWidget()
         controls_layout = QHBoxLayout(controls_widget)
-        controls_layout.setSpacing(5)  # Reduce spacing in controls
+        controls_layout.setSpacing(5)
         
         # Play/Pause button
         self.play_pause_button = QPushButton()
@@ -444,17 +630,22 @@ class VideoConverter(QMainWindow):
         self.stop_button.clicked.connect(self.stop)
         controls_layout.addWidget(self.stop_button)
         
-        # Position slider
-        self.position_slider = QSlider(Qt.Orientation.Horizontal)
-        self.position_slider.setRange(0, 0)
-        self.position_slider.sliderMoved.connect(self.set_position)
-        controls_layout.addWidget(self.position_slider)
+        # Go to In point button
+        self.go_to_in_button = QPushButton("Go to In")
+        self.go_to_in_button.clicked.connect(self.go_to_in_point)
+        controls_layout.addWidget(self.go_to_in_button)
         
-        # Time label
-        self.time_label = QLabel("00:00 / 00:00")
-        self.time_label.setStyleSheet("color: white;")
-        controls_layout.addWidget(self.time_label)
+        # Go to Out point button
+        self.go_to_out_button = QPushButton("Go to Out")
+        self.go_to_out_button.clicked.connect(self.go_to_out_point)
+        controls_layout.addWidget(self.go_to_out_button)
         
+        # Reset in/out points button
+        self.reset_points_button = QPushButton("Reset Points")
+        self.reset_points_button.clicked.connect(self.reset_in_out_points)
+        controls_layout.addWidget(self.reset_points_button)
+        
+        controls_layout.addStretch(1)
         middle_layout.addWidget(controls_widget)
 
         # Format options
@@ -710,10 +901,21 @@ class VideoConverter(QMainWindow):
         output_format = self.format_combo.currentText()
         output_filename = output_name + "." + output_format
         output_file = os.path.join(self.output_directory, output_filename)
+        
+        # Get in/out points
+        in_point = self.timeline_widget.in_point / 1000  # Convert to seconds
+        out_point = self.timeline_widget.out_point / 1000  # Convert to seconds
+        duration = out_point - in_point
+        
         # Gather advanced options
         codec = self.selected_codec or self.codec_combo.currentText().split()[0]
         opts = CODEC_OPTIONS.get(codec, {})
-        format_options = {'vcodec': codec, 'acodec': 'aac'}
+        format_options = {
+            'vcodec': codec,
+            'acodec': 'aac',
+            'ss': str(in_point),  # Start time
+            't': str(duration)    # Duration
+        }
         if 'crf' in opts and self.advanced_group.isVisible():
             format_options['crf'] = str(self.crf_slider.value())
         if opts.get('bitrate', False) and self.advanced_group.isVisible():
@@ -847,27 +1049,49 @@ class VideoConverter(QMainWindow):
         self.media_player.stop()
 
     def set_position(self, position):
+        self.timeline_widget.setPosition(position)
         self.media_player.setPosition(position)
+        self.update_time_label()
 
     def position_changed(self, position):
-        self.position_slider.setValue(position)
+        self.timeline_widget.setPosition(position)
         self.update_time_label()
 
     def duration_changed(self, duration):
-        self.position_slider.setRange(0, duration)
+        self.timeline_widget.setDuration(duration)
+        self.update_time_label()
+
+    def update_in_point(self, position):
+        self.timeline_widget.setInPoint(position)
+        self.update_time_label()
+
+    def update_out_point(self, position):
+        self.timeline_widget.setOutPoint(position)
+        self.update_time_label()
+
+    def reset_in_out_points(self):
+        self.timeline_widget.setInPoint(0)
+        self.timeline_widget.setOutPoint(self.media_player.duration())
         self.update_time_label()
 
     def update_time_label(self):
         position = self.media_player.position()
         duration = self.media_player.duration()
+        in_point = self.timeline_widget.in_point
+        out_point = self.timeline_widget.out_point
         
         def format_time(ms):
-            s = ms // 1000
-            m = s // 60
-            s = s % 60
-            return f"{m:02d}:{s:02d}"
+            total_seconds = ms // 1000
+            m = total_seconds // 60
+            s = total_seconds % 60
+            # Calculate frames based on video FPS
+            frames = int((ms % 1000) * self.video_fps / 1000)
+            return f"{m:02d}:{s:02d}:{frames:02d}"
         
-        self.time_label.setText(f"{format_time(position)} / {format_time(duration)}")
+        self.time_label.setText(
+            f"{format_time(position)} / {format_time(duration)} "
+            f"[In: {format_time(in_point)} Out: {format_time(out_point)}]"
+        )
 
     def playback_state_changed(self, state):
         if state == QMediaPlayer.PlaybackState.PlayingState:
@@ -986,6 +1210,66 @@ class VideoConverter(QMainWindow):
     def closeEvent(self, event):
         self.save_settings()
         super().closeEvent(event)
+
+    def keyPressEvent(self, event):
+        if not self.current_video_path:
+            return
+            
+        if event.key() == Qt.Key.Key_I:
+            # Set in point to current position
+            current_pos = self.media_player.position()
+            if current_pos <= self.timeline_widget.out_point:
+                self.timeline_widget.setInPoint(current_pos)
+                self.update_time_label()
+                # Visual feedback
+                self.status_label.setText("In point set")
+                QTimer.singleShot(1000, lambda: self.status_label.setText("Ready"))
+                
+        elif event.key() == Qt.Key.Key_O:
+            # Set out point to current position
+            current_pos = self.media_player.position()
+            if current_pos >= self.timeline_widget.in_point:
+                self.timeline_widget.setOutPoint(current_pos)
+                self.update_time_label()
+                # Visual feedback
+                self.status_label.setText("Out point set")
+                QTimer.singleShot(1000, lambda: self.status_label.setText("Ready"))
+        
+        elif event.key() == Qt.Key.Key_Left:
+            # Move one frame backward
+            current_pos = self.media_player.position()
+            frame_duration = int(1000 / self.video_fps)  # Convert to milliseconds
+            new_pos = max(self.timeline_widget.in_point, current_pos - frame_duration)
+            self.media_player.setPosition(new_pos)
+            self.timeline_widget.setPosition(new_pos)
+            self.update_time_label()
+            
+        elif event.key() == Qt.Key.Key_Right:
+            # Move one frame forward
+            current_pos = self.media_player.position()
+            frame_duration = int(1000 / self.video_fps)  # Convert to milliseconds
+            new_pos = min(self.timeline_widget.out_point, current_pos + frame_duration)
+            self.media_player.setPosition(new_pos)
+            self.timeline_widget.setPosition(new_pos)
+            self.update_time_label()
+        
+        elif event.key() == Qt.Key.Key_Space:
+            # Toggle play/pause
+            self.play_pause()
+                
+        super().keyPressEvent(event)
+
+    def go_to_in_point(self):
+        if self.current_video_path:
+            self.media_player.setPosition(self.timeline_widget.in_point)
+            self.timeline_widget.setPosition(self.timeline_widget.in_point)
+            self.update_time_label()
+
+    def go_to_out_point(self):
+        if self.current_video_path:
+            self.media_player.setPosition(self.timeline_widget.out_point)
+            self.timeline_widget.setPosition(self.timeline_widget.out_point)
+            self.update_time_label()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)

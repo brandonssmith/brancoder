@@ -41,13 +41,23 @@ I built this with my own preferred workflow so that I can convert video files th
 
 2. Use the interface:
    - Click "Open Video File" to select a video for conversion
+   - Click on the file name and the file details will show in the box below (File, dureation, etc.)
+   - Click the PLAY button to activate the video in the preview windows
+   - Mark In and Out points by using 'I' and 'O' - or leave them be for the whole video
+   - use left and right keys to move one frame forward or backward
    - Choose your desired output format, codec, and quality settings
    - Click "Render" to start the conversion
+   - The problem will review the operation to make sure the correct wrapper and codec are selected
+   - Estimated file size will appear
+   - Click 'YES' to continue the render
    - Monitor the progress in the right panel
 
 ## Note
 
 Make sure FFmpeg is properly installed and accessible from your system's PATH before running the application. 
 
-## Current known errors
- - The Output preview window is currently not showing progress
+## 0.2
+- Added functionality for In and Out points on the main timeline to esport only sections
+- Added ability to use Space to play/pause
+- Use I/O to set in/out points
+- Use Left/Right arrows for frame-by-frame navigation
