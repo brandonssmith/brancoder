@@ -757,6 +757,28 @@ class VideoConverter(QMainWindow):
         msg_box.setWindowTitle("Estimated File Size")
         msg_box.setText(f"{est_size_str}\nProceed with conversion?")
         msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg_box.setStyleSheet(
+            """
+            QMessageBox {
+                background-color: #232323;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QPushButton {
+                color: #ffffff;
+                background-color: #414141;
+                border: 1px solid #555555;
+                padding: 5px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #4a4a4a;
+                border: 1px solid #666666;
+            }
+            """
+        )
         reply = msg_box.exec()
         if reply != QMessageBox.StandardButton.Yes:
             self.status_label.setText("Conversion cancelled.")
