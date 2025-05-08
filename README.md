@@ -2,6 +2,8 @@
 
 A modern video conversion application with a dark theme interface, built using Python, PyQt6, and FFmpeg.
 
+I built this with my own preferred workflow so that I can convert video files the way that I prefer to.
+
 ## Features
 
 - Modern dark theme UI
