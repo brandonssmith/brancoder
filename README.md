@@ -48,3 +48,6 @@ I built this with my own preferred workflow so that I can convert video files th
 ## Note
 
 Make sure FFmpeg is properly installed and accessible from your system's PATH before running the application. 
+
+## Current known errors
+ - The Output preview window is currently not showing progress
