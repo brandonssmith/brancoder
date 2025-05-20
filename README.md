@@ -4,6 +4,8 @@ A modern video conversion application with a dark theme interface, built using P
 
 I built this with my own preferred workflow so that I can convert video files the way that I prefer to.
 
+***PLEASE NOTE - currently there are issues with the app that are unresolved. Using this app is not recommended.
+
 ## Features
 
 - Modern dark theme UI
